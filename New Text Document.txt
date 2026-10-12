@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Online Skill Platform</title>
+</head>
+<body>
+
+<h1>Welcome to Online Skill Certification Platform</h1>
+
+</body>
+</html>

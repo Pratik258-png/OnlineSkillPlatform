@@ -1,0 +1,124 @@
+/* =========================================
+   BACK BUTTON
+   ========================================= */
+
+.back-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 10px 22px;
+    margin: 0;
+
+    color: white;
+    text-decoration: none;
+
+    font-size: 15px;
+    font-weight: 600;
+
+    border-radius: 50px;
+
+    background: linear-gradient(
+        135deg,
+        #2563eb,
+        #06b6d4,
+        #0891b2
+    );
+
+    background-size: 200% 200%;
+
+    border: 1px solid rgba(0, 255, 213, 0.25);
+
+    box-shadow:
+        0 5px 15px rgba(6, 182, 212, 0.25);
+
+    transition: all 0.3s ease;
+
+    animation: backGradient 3s ease infinite;
+}
+
+
+/* =========================================
+   BACK BUTTON HOVER
+   ========================================= */
+
+.back-btn:hover {
+    color: white;
+    text-decoration: none;
+
+    transform:
+        translateY(-3px)
+        scale(1.05);
+
+    box-shadow:
+        0 10px 25px rgba(6, 182, 212, 0.45);
+
+    border-color:
+        rgba(0, 255, 213, 0.55);
+}
+
+
+/* =========================================
+   BACK BUTTON CLICK
+   ========================================= */
+
+.back-btn:active {
+    transform:
+        translateY(0)
+        scale(0.97);
+}
+
+
+/* =========================================
+   ANIMATED GRADIENT
+   ========================================= */
+
+@keyframes backGradient {
+
+    0% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
+
+    100% {
+        background-position: 0% 50%;
+    }
+
+}
+
+
+/* =========================================
+   TOP ACTIONS
+   BACK + LOGOUT
+   ========================================= */
+
+.top-actions {
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    gap: 12px;
+}
+
+
+/* =========================================
+   MOBILE RESPONSIVE
+   ========================================= */
+
+@media (max-width: 768px) {
+
+    .top-actions {
+        gap: 8px;
+    }
+
+    .back-btn {
+        padding: 9px 16px;
+        font-size: 14px;
+    }
+
+}
