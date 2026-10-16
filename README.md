@@ -25,3 +25,8 @@ An AI-powered Online Learning Platform with Certification.
 
 ## Developer
 Pratik Pagar
+
+## Project Links
+
+- **Live Website:** https://onlineskillpratik.free.nf/
+- **GitHub Source Code:** https://github.com/Pratik258-png/OnlineSkillPlatform
