@@ -1320,15 +1320,14 @@ body {
         </p>
 
 
-        <button
-            type="button"
-            id="progressButton"
-            class="action-btn progress-btn"
-            onclick="showProgress()">
+    
+           <a
+    href="save.php"
+    class="action-btn progress-btn">
 
-            📊 View Progress →
+    📊 View Progress →
 
-        </button>
+</a>
 
 
         <!-- PROGRESS DETAILS -->
