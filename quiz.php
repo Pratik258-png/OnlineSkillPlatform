@@ -837,6 +837,35 @@ body {
 
     margin-right: 10px;
 
+}  /* PROFESSIONAL RED BACK BUTTON */
+
+.back-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 20px;
+    margin-bottom: 22px;
+
+    background: #dc3545;
+    color: #ffffff;
+    border: 2px solid #dc3545;
+    border-radius: 10px;
+
+    text-decoration: none;
+    font-size: 16px;
+    font-weight: bold;
+
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.back-button:hover {
+    background: #b02a37;
+    border-color: #b02a37;
+    color: #ffffff;
+
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(220, 53, 69, 0.3);
 }
 
 .submit-btn {
@@ -895,7 +924,17 @@ body {
 
 <body>
 
-<div class="container">
+<div class="container"> <a
+    href="javascript:void(0);"
+    class="back-button"
+    onclick="if (window.history.length > 1) {
+        window.history.back();
+    } else {
+        window.location.href='student/dashboard.php';
+    }"
+>
+    &#8592; Back
+</a>
 
     <div class="header">
 
