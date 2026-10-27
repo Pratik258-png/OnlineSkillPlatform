@@ -19,7 +19,7 @@ $name = $_SESSION['name'] ?? 'Student';
    GEMINI API KEY
 ========================================================= */
 
-$GEMINI_API_KEY = "gemini api key";
+$GEMINI_API_KEY = "AQ.Ab8RN6JX168mAk1EzxgTnTr_BYcmvplB9Kh1Vpwxe26ZBWy_rw";
 
 
 /* =========================================================
@@ -404,11 +404,10 @@ PROMPT;
                         ) !== false
                     ) {
 
-                        $error =
-                            "❌ Gemini quota reached for "
-                            . $MODEL
-                            . ". Please wait for the quota "
-                            . "to reset or enable billing.";
+                        $error = "Gemini API Error (HTTP "
+    . $httpCode
+    . "): "
+    . $apiMessage;
 
                     }
 
