@@ -4,569 +4,120 @@ session_start();
 
 include 'includes/db.php';
 
-/* ==========================================
-   LOGIN CHECK
-========================================== */
-
-if (!isset($_SESSION['user_id'])) {
-    header("Location: login.php");
-    exit();
-}
-
-$user_id = intval($_SESSION['user_id']);
+$error = "";
 
 /* ==========================================
-   GET COURSE ID
+   LOGIN / CREATE USER
 ========================================== */
 
-$course_id = 0;
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
-if (isset($_POST['course_id'])) {
-    $course_id = intval($_POST['course_id']);
-}
+    $name = trim($_POST['name'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $password = $_POST['password'] ?? '';
 
-if ($course_id <= 0 && isset($_SESSION['quiz_course_id'])) {
-    $course_id = intval($_SESSION['quiz_course_id']);
-}
+    /* ==========================================
+       VALIDATION
+    ========================================== */
 
-if ($course_id <= 0 && isset($_SESSION['current_course_id'])) {
-    $course_id = intval($_SESSION['current_course_id']);
-}
+    if ($name == "" || $email == "" || $password == "") {
 
-if ($course_id <= 0) {
-    die("Invalid course ID.");
-}
+        $error = "Please fill all fields.";
 
-/* ==========================================
-   GET COURSE NAME
-========================================== */
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
 
-$course_sql = "
-    SELECT course_name
-    FROM courses
-    WHERE id = $course_id
-    LIMIT 1
-";
+        $error = "Please enter a valid email address.";
 
-$course_result = mysqli_query($conn, $course_sql);
+    } else {
 
-if (!$course_result) {
-    die(
-        "COURSE QUERY ERROR: " .
-        mysqli_error($conn)
-    );
-}
+        $name_safe = mysqli_real_escape_string($conn, $name);
+        $email_safe = mysqli_real_escape_string($conn, $email);
 
-if (mysqli_num_rows($course_result) == 0) {
-    die("Course not found.");
-}
+        /* ==========================================
+           CHECK USER
+        ========================================== */
 
-$course_data = mysqli_fetch_assoc($course_result);
+        $sql = "SELECT * FROM users
+                WHERE email='$email_safe'
+                LIMIT 1";
 
-$course_name = $course_data['course_name'];
+        $result = mysqli_query($conn, $sql);
 
-$course_lower = strtolower(trim($course_name));
+        /* ==========================================
+           EXISTING USER
+        ========================================== */
 
-/* ==========================================
-   GET CORRECT ANSWERS FROM SESSION
-========================================== */
+        if ($result && mysqli_num_rows($result) > 0) {
 
-$correct_answers = [];
+            $user = mysqli_fetch_assoc($result);
 
-if (
-    isset($_SESSION['quiz_answers']) &&
-    is_array($_SESSION['quiz_answers'])
-) {
-    $correct_answers = $_SESSION['quiz_answers'];
-}
+            $user_id = intval($user['id']);
 
-/* ==========================================
-   CHECK ANSWERS
-========================================== */
+            /* UPDATE NAME */
 
-$score = 0;
-$total_questions = count($correct_answers);
+            $update_sql = "UPDATE users
+                           SET name='$name_safe'
+                           WHERE id=$user_id";
 
-$wrong_answers = [];
-$unanswered = [];
+            mysqli_query($conn, $update_sql);
 
-if ($total_questions > 0) {
+            /* SESSION */
 
-    foreach ($correct_answers as $question_key => $correct_answer) {
+            $_SESSION['user_id'] = $user_id;
+            $_SESSION['student_id'] = $user_id;
+            $_SESSION['name'] = $name;
+            $_SESSION['email'] = $user['email'];
+            $_SESSION['role'] = $user['role'];
 
-        $user_answer = "";
+            /* DASHBOARD */
 
-        if (isset($_POST[$question_key])) {
-            $user_answer = trim($_POST[$question_key]);
+            header("Location: student/dashboard.php");
+            exit;
         }
 
-        /* UNANSWERED */
+        /* ==========================================
+           NEW USER
+        ========================================== */
 
-        if ($user_answer === "") {
-
-            $unanswered[] = $question_key;
-
-            $wrong_answers[] = [
-                'question' => $question_key,
-                'user_answer' => 'Not Answered',
-                'correct_answer' => $correct_answer
-            ];
-
-            continue;
-        }
-
-        /* CORRECT */
-
-        if (
-            strtolower(trim($user_answer)) ===
-            strtolower(trim($correct_answer))
-        ) {
-
-            $score++;
-
-        }
         else {
 
-            $wrong_answers[] = [
-                'question' => $question_key,
-                'user_answer' => $user_answer,
-                'correct_answer' => $correct_answer
-            ];
+            $hashed_password = password_hash(
+                $password,
+                PASSWORD_DEFAULT
+            );
+
+            $insert_sql = "INSERT INTO users
+                           (name, email, password, role)
+                           VALUES
+                           ('$name_safe',
+                            '$email_safe',
+                            '$hashed_password',
+                            'student')";
+
+            if (mysqli_query($conn, $insert_sql)) {
+
+                $new_user_id = mysqli_insert_id($conn);
+
+                /* SESSION */
+
+                $_SESSION['user_id'] = $new_user_id;
+                $_SESSION['student_id'] = $new_user_id;
+                $_SESSION['name'] = $name;
+                $_SESSION['email'] = $email;
+                $_SESSION['role'] = "student";
+
+                /* DASHBOARD */
+
+                header("Location: student/dashboard.php");
+                exit;
+
+            } else {
+
+                $error = "Unable to create account. "
+                       . mysqli_error($conn);
+            }
         }
     }
-}
-
-/* ==========================================
-   CALCULATE PERCENTAGE
-========================================== */
-
-if ($total_questions > 0) {
-
-    $percentage =
-        ($score / $total_questions) * 100;
-
-}
-else {
-
-    $percentage = 0;
-}
-
-$percentage = round($percentage, 2);
-
-/* ==========================================
-   SAVE RESULT IN DATABASE
-========================================== */
-
-$user_id = intval($user_id);
-$course_id = intval($course_id);
-$score = intval($score);
-$percentage = floatval($percentage);
-
-/* CHECK EXISTING RESULT */
-
-$check_result_sql = "
-    SELECT id
-    FROM results
-    WHERE user_id = $user_id
-    AND course_id = $course_id
-    LIMIT 1
-";
-
-$check_result = mysqli_query(
-    $conn,
-    $check_result_sql
-);
-
-if (!$check_result) {
-
-    die(
-        "CHECK RESULT ERROR: " .
-        mysqli_error($conn)
-    );
-}
-
-/* UPDATE EXISTING RESULT */
-
-if (mysqli_num_rows($check_result) > 0) {
-
-    $existing = mysqli_fetch_assoc(
-        $check_result
-    );
-
-    $result_id = intval(
-        $existing['id']
-    );
-
-    $update_sql = "
-        UPDATE results
-        SET
-            score = $score,
-            percentage = $percentage
-        WHERE id = $result_id
-    ";
-
-    $update_result = mysqli_query(
-        $conn,
-        $update_sql
-    );
-
-    if (!$update_result) {
-
-        die(
-            "UPDATE RESULT ERROR: " .
-            mysqli_error($conn)
-        );
-    }
-
-}
-
-/* INSERT NEW RESULT */
-
-else {
-
-    $insert_sql = "
-        INSERT INTO results
-        (
-            user_id,
-            course_id,
-            score,
-            percentage
-        )
-        VALUES
-        (
-            $user_id,
-            $course_id,
-            $score,
-            $percentage
-        )
-    ";
-
-    $insert_result = mysqli_query(
-        $conn,
-        $insert_sql
-    );
-
-    if (!$insert_result) {
-
-        die(
-            "INSERT RESULT ERROR: " .
-            mysqli_error($conn)
-        );
-    }
-}
-
-/* ==========================================
-   VERIFY RESULT
-========================================== */
-
-$verify_sql = "
-    SELECT
-        id,
-        user_id,
-        course_id,
-        score,
-        percentage
-    FROM results
-    WHERE user_id = $user_id
-    AND course_id = $course_id
-    LIMIT 1
-";
-
-$verify_result = mysqli_query(
-    $conn,
-    $verify_sql
-);
-
-if (!$verify_result) {
-
-    die(
-        "VERIFY RESULT ERROR: " .
-        mysqli_error($conn)
-    );
-}
-
-if (mysqli_num_rows($verify_result) == 0) {
-
-    die(
-        "ERROR: Quiz result was not saved in database."
-    );
-}
-
-/* ==========================================
-   AUTOMATIC STUDENT SKILL UPDATE
-========================================== */
-
-$skill_score_value = floatval($percentage);
-
-$skill_name = "";
-
-/* PYTHON */
-
-if (
-    strpos($course_lower, 'python') !== false
-) {
-
-    $skill_name = "Python Basics";
-}
-
-/* MYSQL / SQL */
-
-elseif (
-    strpos($course_lower, 'mysql') !== false ||
-    strpos($course_lower, 'sql') !== false
-) {
-
-    $skill_name = "MySQL";
-}
-
-/* JAVA */
-
-elseif (
-    strpos($course_lower, 'java') !== false
-) {
-
-    $skill_name = "Java Basics";
-}
-
-/* HTML */
-
-elseif (
-    strpos($course_lower, 'html') !== false
-) {
-
-    $skill_name = "HTML";
-}
-
-/* CSS */
-
-elseif (
-    strpos($course_lower, 'css') !== false
-) {
-
-    $skill_name = "CSS";
-}
-
-/* JAVASCRIPT */
-
-elseif (
-    strpos($course_lower, 'javascript') !== false ||
-    strpos($course_lower, 'js') !== false
-) {
-
-    $skill_name = "JavaScript";
-}
-
-/* FLASK */
-
-elseif (
-    strpos($course_lower, 'flask') !== false
-) {
-
-    $skill_name = "Flask";
-}
-
-/* REST API */
-
-elseif (
-    strpos($course_lower, 'rest api') !== false ||
-    strpos($course_lower, 'api') !== false
-) {
-
-    $skill_name = "REST API";
-}
-
-/* ==========================================
-   SKILL LEVEL
-========================================== */
-
-$skill_level = "Beginner";
-
-if ($skill_score_value >= 80) {
-
-    $skill_level = "Advanced";
-
-}
-elseif ($skill_score_value >= 60) {
-
-    $skill_level = "Intermediate";
-
-}
-else {
-
-    $skill_level = "Beginner";
-}
-
-/* ==========================================
-   SAVE / UPDATE STUDENT SKILL
-========================================== */
-
-if ($skill_name !== "") {
-
-    $safe_skill_name =
-        mysqli_real_escape_string(
-            $conn,
-            $skill_name
-        );
-
-    $safe_skill_level =
-        mysqli_real_escape_string(
-            $conn,
-            $skill_level
-        );
-
-    /* CHECK SKILL */
-
-    $check_skill_sql = "
-        SELECT id
-        FROM student_skills
-        WHERE user_id = $user_id
-        AND skill_name = '$safe_skill_name'
-        LIMIT 1
-    ";
-
-    $check_skill = mysqli_query(
-        $conn,
-        $check_skill_sql
-    );
-
-    if (!$check_skill) {
-
-        die(
-            "CHECK SKILL ERROR: " .
-            mysqli_error($conn)
-        );
-    }
-
-    /* UPDATE SKILL */
-
-    if (mysqli_num_rows($check_skill) > 0) {
-
-        $existing_skill =
-            mysqli_fetch_assoc(
-                $check_skill
-            );
-
-        $skill_id =
-            intval(
-                $existing_skill['id']
-            );
-
-        $update_skill_sql = "
-            UPDATE student_skills
-            SET
-                skill_score = $skill_score_value,
-                skill_level = '$safe_skill_level',
-                source = 'Quiz'
-            WHERE id = $skill_id
-        ";
-
-        $update_skill =
-            mysqli_query(
-                $conn,
-                $update_skill_sql
-            );
-
-        if (!$update_skill) {
-
-            die(
-                "UPDATE SKILL ERROR: " .
-                mysqli_error($conn)
-            );
-        }
-
-    }
-
-    /* INSERT SKILL */
-
-    else {
-
-        $insert_skill_sql = "
-            INSERT INTO student_skills
-            (
-                user_id,
-                skill_name,
-                skill_score,
-                skill_level,
-                source
-            )
-            VALUES
-            (
-                $user_id,
-                '$safe_skill_name',
-                $skill_score_value,
-                '$safe_skill_level',
-                'Quiz'
-            )
-        ";
-
-        $insert_skill =
-            mysqli_query(
-                $conn,
-                $insert_skill_sql
-            );
-
-        if (!$insert_skill) {
-
-            die(
-                "INSERT SKILL ERROR: " .
-                mysqli_error($conn)
-            );
-        }
-    }
-}
-
-/* ==========================================
-   GET ALL STUDENT SKILLS
-========================================== */
-
-$final_skill_sql = "
-    SELECT
-        skill_name,
-        skill_score,
-        skill_level,
-        source
-    FROM student_skills
-    WHERE user_id = $user_id
-    ORDER BY id DESC
-";
-
-$final_skill_result =
-    mysqli_query(
-        $conn,
-        $final_skill_sql
-    );
-
-if (!$final_skill_result) {
-
-    die(
-        "FINAL SKILL CHECK ERROR: " .
-        mysqli_error($conn)
-    );
-}
-
-/* ==========================================
-   RESULT MESSAGE
-========================================== */
-
-if ($percentage >= 80) {
-
-    $message = "Excellent Performance!";
-
-}
-elseif ($percentage >= 60) {
-
-    $message = "Good Performance!";
-
-}
-elseif ($percentage >= 40) {
-
-    $message = "Keep Improving!";
-
-}
-else {
-
-    $message = "You Need More Practice.";
-
 }
 
 ?>
@@ -581,76 +132,569 @@ else {
 <meta name="viewport"
       content="width=device-width, initial-scale=1.0">
 
-<title>
-    Quiz Result - <?php echo htmlspecialchars($course_name); ?>
-</title>
+<title>Student Login | Online Skill Platform</title>
+
+<link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css"
+    rel="stylesheet">
 
 <style>
 
+/* =====================================================
+   GLOBAL
+===================================================== */
+
 * {
     box-sizing: border-box;
+}
+
+html,
+body {
+    width: 100%;
+    min-height: 100%;
 }
 
 body {
 
     margin: 0;
 
+    min-height: 100vh;
+
     font-family:
         Arial,
         Helvetica,
         sans-serif;
 
-    min-height: 100vh;
+    overflow: hidden;
+
+    color: white;
+
+    position: relative;
 
     background:
+
+        radial-gradient(
+            circle at 10% 15%,
+            rgba(0, 210, 255, 0.12),
+            transparent 25%
+        ),
+
+        radial-gradient(
+            circle at 90% 85%,
+            rgba(124, 58, 237, 0.16),
+            transparent 28%
+        ),
+
         linear-gradient(
             135deg,
-            #667eea,
-            #764ba2,
-            #6dd5ed
+            #020617 0%,
+            #07152f 35%,
+            #0b1733 65%,
+            #11103a 100%
+        );
+}
+
+
+/* =====================================================
+   DIGITAL GRID
+===================================================== */
+
+body::before {
+
+    content: "";
+
+    position: fixed;
+
+    inset: 0;
+
+    pointer-events: none;
+
+    z-index: 0;
+
+    opacity: 0.30;
+
+    background-image:
+
+        linear-gradient(
+            rgba(56,189,248,0.055) 1px,
+            transparent 1px
+        ),
+
+        linear-gradient(
+            90deg,
+            rgba(56,189,248,0.055) 1px,
+            transparent 1px
         );
 
-    padding: 40px 20px;
+    background-size: 55px 55px;
 
+    mask-image:
+        radial-gradient(
+            ellipse at center,
+            black 20%,
+            transparent 78%
+        );
 }
 
-.container {
 
-    max-width: 900px;
+/* =====================================================
+   DIGITAL GLOW
+===================================================== */
 
-    margin: auto;
+body::after {
 
-}
+    content: "";
 
-.result-card {
+    position: fixed;
 
-    background: white;
+    width: 520px;
+    height: 520px;
 
-    border-radius: 25px;
-
-    padding: 40px;
-
-    box-shadow:
-        0 20px 50px
-        rgba(0,0,0,0.25);
-
-    text-align: center;
-
-}
-
-.icon {
-
-    width: 90px;
-
-    height: 90px;
-
-    margin: auto;
+    left: -210px;
+    top: -220px;
 
     border-radius: 50%;
 
-    background: #667eea;
+    background:
 
-    color: white;
+        radial-gradient(
+            circle,
+            rgba(0,220,255,0.18),
+            rgba(0,220,255,0.05) 40%,
+            transparent 70%
+        );
+
+    filter: blur(8px);
+
+    animation:
+        glowMoveOne
+        10s
+        ease-in-out
+        infinite;
+
+    pointer-events: none;
+
+    z-index: 0;
+}
+
+
+@keyframes glowMoveOne {
+
+    0% {
+        transform: translate(0,0) scale(1);
+    }
+
+    50% {
+        transform: translate(180px,170px) scale(1.25);
+    }
+
+    100% {
+        transform: translate(0,0) scale(1);
+    }
+}
+
+
+/* =====================================================
+   ORBS
+===================================================== */
+
+.bg-orb {
+
+    position: fixed;
+
+    border-radius: 50%;
+
+    pointer-events: none;
+
+    z-index: 0;
+
+    filter: blur(2px);
+}
+
+
+.orb-one {
+
+    width: 280px;
+    height: 280px;
+
+    right: -100px;
+    top: 80px;
+
+    background:
+
+        radial-gradient(
+            circle,
+            rgba(124,58,237,0.22),
+            transparent 70%
+        );
+
+    animation:
+        orbOne
+        9s
+        ease-in-out
+        infinite;
+}
+
+
+.orb-two {
+
+    width: 220px;
+    height: 220px;
+
+    left: 5%;
+    bottom: -80px;
+
+    background:
+
+        radial-gradient(
+            circle,
+            rgba(6,182,212,0.15),
+            transparent 70%
+        );
+
+    animation:
+        orbTwo
+        8s
+        ease-in-out
+        infinite;
+}
+
+
+@keyframes orbOne {
+
+    0% {
+        transform: translate(0,0) scale(1);
+    }
+
+    50% {
+        transform: translate(-100px,100px) scale(1.25);
+    }
+
+    100% {
+        transform: translate(0,0) scale(1);
+    }
+}
+
+
+@keyframes orbTwo {
+
+    0% {
+        transform: translate(0,0);
+    }
+
+    50% {
+        transform: translate(100px,-80px);
+    }
+
+    100% {
+        transform: translate(0,0);
+    }
+}
+
+
+/* =====================================================
+   AI NETWORK
+===================================================== */
+
+.ai-network {
+
+    position: fixed;
+
+    inset: 0;
+
+    pointer-events: none;
+
+    z-index: 1;
+
+    overflow: hidden;
+}
+
+
+.node {
+
+    position: absolute;
+
+    width: 6px;
+    height: 6px;
+
+    border-radius: 50%;
+
+    background: #38bdf8;
+
+    box-shadow:
+        0 0 8px #38bdf8,
+        0 0 20px rgba(56,189,248,0.65);
+
+    animation:
+        nodePulse
+        3s
+        ease-in-out
+        infinite;
+}
+
+
+.node1 {
+    left: 8%;
+    top: 22%;
+}
+
+.node2 {
+    left: 22%;
+    top: 12%;
+    animation-delay: 0.5s;
+}
+
+.node3 {
+    left: 31%;
+    top: 27%;
+    animation-delay: 1s;
+}
+
+.node4 {
+    right: 9%;
+    top: 22%;
+    animation-delay: 0.7s;
+}
+
+.node5 {
+    right: 22%;
+    top: 13%;
+    animation-delay: 1.2s;
+}
+
+.node6 {
+    right: 31%;
+    top: 28%;
+    animation-delay: 1.7s;
+}
+
+.node7 {
+    left: 12%;
+    bottom: 21%;
+    animation-delay: 0.8s;
+}
+
+.node8 {
+    left: 27%;
+    bottom: 13%;
+    animation-delay: 1.5s;
+}
+
+.node9 {
+    right: 12%;
+    bottom: 21%;
+    animation-delay: 0.4s;
+}
+
+.node10 {
+    right: 27%;
+    bottom: 13%;
+    animation-delay: 1.8s;
+}
+
+
+@keyframes nodePulse {
+
+    0% {
+        transform: scale(1);
+        opacity: 0.45;
+    }
+
+    50% {
+        transform: scale(1.8);
+        opacity: 1;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 0.45;
+    }
+}
+
+
+/* =====================================================
+   NETWORK LINES
+===================================================== */
+
+.network-line {
+
+    position: absolute;
+
+    height: 1px;
+
+    transform-origin: left center;
+
+    background:
+
+        linear-gradient(
+            90deg,
+            transparent,
+            rgba(56,189,248,0.35),
+            transparent
+        );
+
+    opacity: 0.35;
+
+    animation:
+        linePulse
+        4s
+        ease-in-out
+        infinite;
+}
+
+
+.line1 {
+    width: 240px;
+    left: 8%;
+    top: 22%;
+    transform: rotate(-18deg);
+}
+
+.line2 {
+    width: 230px;
+    left: 22%;
+    top: 12%;
+    transform: rotate(48deg);
+}
+
+.line3 {
+    width: 260px;
+    left: 22%;
+    top: 12%;
+    transform: rotate(12deg);
+}
+
+.line4 {
+    width: 240px;
+    right: 8%;
+    top: 22%;
+    transform: rotate(198deg);
+}
+
+.line5 {
+    width: 230px;
+    right: 22%;
+    top: 13%;
+    transform: rotate(132deg);
+}
+
+.line6 {
+    width: 260px;
+    right: 22%;
+    top: 13%;
+    transform: rotate(168deg);
+}
+
+
+@keyframes linePulse {
+
+    0% {
+        opacity: 0.18;
+    }
+
+    50% {
+        opacity: 0.55;
+    }
+
+    100% {
+        opacity: 0.18;
+    }
+}
+
+
+/* =====================================================
+   PARTICLES
+===================================================== */
+
+.particle {
+
+    position: fixed;
+
+    width: 3px;
+    height: 3px;
+
+    border-radius: 50%;
+
+    background: #67e8f9;
+
+    box-shadow:
+        0 0 10px
+        rgba(103,232,249,0.8);
+
+    pointer-events: none;
+
+    z-index: 1;
+
+    animation:
+        particleFloat
+        8s
+        linear
+        infinite;
+}
+
+
+.p1 {
+    left: 15%;
+    bottom: -10px;
+}
+
+.p2 {
+    left: 35%;
+    bottom: -10px;
+    animation-delay: 2s;
+}
+
+.p3 {
+    left: 65%;
+    bottom: -10px;
+    animation-delay: 4s;
+}
+
+.p4 {
+    left: 82%;
+    bottom: -10px;
+    animation-delay: 1s;
+}
+
+.p5 {
+    left: 50%;
+    bottom: -10px;
+    animation-delay: 5s;
+}
+
+
+@keyframes particleFloat {
+
+    0% {
+        transform: translateY(0);
+        opacity: 0;
+    }
+
+    20% {
+        opacity: 0.8;
+    }
+
+    80% {
+        opacity: 0.8;
+    }
+
+    100% {
+        transform:
+            translateY(-110vh)
+            translateX(70px);
+
+        opacity: 0;
+    }
+}
+
+
+/* =====================================================
+   LOGIN WRAPPER
+===================================================== */
+
+.login-wrapper {
+
+    min-height: 100vh;
 
     display: flex;
 
@@ -658,527 +702,903 @@ body {
 
     justify-content: center;
 
-    font-size: 45px;
+    padding: 30px;
 
+    position: relative;
+
+    z-index: 5;
 }
 
-h1 {
 
-    margin-top: 20px;
+/* =====================================================
+   LOGIN CARD
+===================================================== */
 
-    color: #222;
-
-}
-
-.course {
-
-    color: #667eea;
-
-    font-size: 20px;
-
-    font-weight: bold;
-
-}
-
-.message {
-
-    font-size: 20px;
-
-    margin: 15px 0 30px;
-
-    font-weight: bold;
-
-}
-
-.score-box {
-
-    display: grid;
-
-    grid-template-columns:
-        repeat(3, 1fr);
-
-    gap: 20px;
-
-    margin: 30px 0;
-
-}
-
-.score-item {
-
-    background: #f5f7ff;
-
-    border-radius: 18px;
-
-    padding: 25px;
-
-}
-
-.score-number {
-
-    font-size: 32px;
-
-    font-weight: bold;
-
-    color: #667eea;
-
-}
-
-.score-label {
-
-    color: #666;
-
-    margin-top: 8px;
-
-}
-
-.progress {
+.login-card {
 
     width: 100%;
 
-    height: 18px;
-
-    background: #eee;
-
-    border-radius: 20px;
-
-    overflow: hidden;
-
-    margin: 25px 0;
-
-}
-
-.progress-bar {
-
-    height: 100%;
-
-    width: <?php echo min(100, $percentage); ?>%;
+    max-width: 470px;
 
     background:
+        rgba(8,18,40,0.94);
+
+    backdrop-filter:
+        blur(20px);
+
+    border:
+        1px solid
+        rgba(0,255,213,0.20);
+
+    border-radius:
+        25px;
+
+    overflow:
+        hidden;
+
+    box-shadow:
+
+        0 30px 80px
+        rgba(0,0,0,0.60),
+
+        0 0 40px
+        rgba(0,255,213,0.08);
+
+    /* IMPORTANT FIX */
+    opacity: 1;
+
+    position: relative;
+
+    transform-style:
+        preserve-3d;
+}
+
+
+/* =====================================================
+   TOP LINE
+===================================================== */
+
+.login-card::before {
+
+    content: "";
+
+    position: absolute;
+
+    top: 0;
+
+    left: 0;
+
+    width: 100%;
+
+    height: 4px;
+
+    background:
+
         linear-gradient(
             90deg,
+            #00ffd5,
+            #00aaff,
+            #8b5cf6,
+            #00aaff,
+            #00ffd5
+        );
+
+    background-size:
+        300% 100%;
+
+    animation:
+        topLine
+        3s linear infinite;
+}
+
+
+@keyframes topLine {
+
+    0% {
+        background-position: 0% 50%;
+    }
+
+    100% {
+        background-position: 300% 50%;
+    }
+}
+
+
+/* =====================================================
+   HEADER
+===================================================== */
+
+.login-header {
+
+    text-align: center;
+
+    padding:
+        30px 25px 20px;
+
+    background:
+
+        linear-gradient(
+            135deg,
+            rgba(0,255,213,0.12),
+            rgba(139,92,246,0.14)
+        );
+
+    border-bottom:
+        1px solid
+        rgba(255,255,255,0.08);
+}
+
+
+/* =====================================================
+   ICON
+===================================================== */
+
+.login-icon {
+
+    width: 75px;
+    height: 75px;
+
+    margin:
+        0 auto 15px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    border-radius: 50%;
+
+    font-size: 35px;
+
+    background:
+
+        linear-gradient(
+            135deg,
+            #00c6ff,
+            #7c3aed
+        );
+
+    box-shadow:
+
+        0 0 30px
+        rgba(0,198,255,0.35);
+
+    animation:
+        iconFloat
+        3s ease-in-out infinite;
+}
+
+
+@keyframes iconFloat {
+
+    0% {
+        transform:
+            translateY(0)
+            rotate(0deg);
+    }
+
+    50% {
+        transform:
+            translateY(-8px)
+            rotate(5deg);
+    }
+
+    100% {
+        transform:
+            translateY(0)
+            rotate(0deg);
+    }
+}
+
+
+/* =====================================================
+   TITLE
+===================================================== */
+
+.login-header h3 {
+
+    margin: 0;
+
+    color: white;
+
+    font-size: 28px;
+
+    font-weight: 700;
+}
+
+
+.login-header p {
+
+    margin:
+        8px 0 0;
+
+    color:
+        #94a3b8;
+
+    font-size:
+        14px;
+}
+
+
+/* =====================================================
+   BODY
+===================================================== */
+
+.login-body {
+
+    padding:
+        30px;
+}
+
+
+/* =====================================================
+   ERROR
+===================================================== */
+
+.alert-danger {
+
+    background:
+        rgba(220,38,38,0.15);
+
+    color:
+        #fca5a5;
+
+    border:
+        1px solid
+        rgba(248,113,113,0.30);
+
+    border-radius:
+        12px;
+}
+
+
+/* =====================================================
+   FORM
+===================================================== */
+
+.form-group {
+
+    margin-bottom:
+        22px;
+
+    /* IMPORTANT FIX */
+    opacity: 1;
+}
+
+
+/* =====================================================
+   LABEL
+===================================================== */
+
+.form-label {
+
+    color:
+        #dbeafe;
+
+    font-weight:
+        600;
+
+    margin-bottom:
+        8px;
+}
+
+
+/* =====================================================
+   INPUT
+===================================================== */
+
+.form-control {
+
+    background:
+        rgba(2,6,23,0.75);
+
+    border:
+        1px solid
+        rgba(148,163,184,0.25);
+
+    color:
+        white;
+
+    border-radius:
+        12px;
+
+    padding:
+        13px 15px;
+
+    transition:
+        all 0.3s ease;
+}
+
+
+.form-control::placeholder {
+
+    color:
+        #64748b;
+}
+
+
+.form-control:hover {
+
+    border-color:
+        rgba(0,255,213,0.40);
+
+    transform:
+        translateY(-1px);
+}
+
+
+.form-control:focus {
+
+    background:
+        rgba(2,6,23,0.95);
+
+    color:
+        white;
+
+    border-color:
+        #00ffd5;
+
+    outline:
+        none;
+
+    box-shadow:
+
+        0 0 0 3px
+        rgba(0,255,213,0.08),
+
+        0 0 25px
+        rgba(0,255,213,0.18);
+
+    transform:
+        translateY(-3px);
+}
+
+
+/* =====================================================
+   LOGIN BUTTON
+===================================================== */
+
+.login-btn {
+
+    width: 100%;
+
+    position: relative;
+
+    border: none;
+
+    border-radius: 50px;
+
+    padding: 14px;
+
+    font-size: 17px;
+
+    font-weight: 700;
+
+    color: white;
+
+    background:
+
+        linear-gradient(
+            135deg,
+            #00b894,
+            #00cec9,
+            #0984e3,
+            #6c5ce7
+        );
+
+    background-size:
+        300% 300%;
+
+    animation:
+        buttonGradient
+        5s ease infinite;
+
+    box-shadow:
+
+        0 10px 30px
+        rgba(0,206,201,0.30);
+
+    overflow:
+        hidden;
+
+    cursor:
+        pointer;
+
+    transition:
+        all 0.3s ease;
+}
+
+
+@keyframes buttonGradient {
+
+    0% {
+        background-position:
+            0% 50%;
+    }
+
+    50% {
+        background-position:
+            100% 50%;
+    }
+
+    100% {
+        background-position:
+            0% 50%;
+    }
+}
+
+
+.login-btn:hover {
+
+    transform:
+        translateY(-5px)
+        scale(1.02);
+
+    box-shadow:
+
+        0 18px 40px
+        rgba(0,206,201,0.45);
+}
+
+
+.login-btn:active {
+
+    transform:
+        scale(0.96);
+}
+
+
+/* =====================================================
+   ARROW
+===================================================== */
+
+.login-arrow {
+
+    display:
+        inline-block;
+
+    margin-left:
+        8px;
+
+    transition:
+        transform
+        0.3s ease;
+}
+
+
+.login-btn:hover .login-arrow {
+
+    transform:
+        translateX(7px);
+}
+
+
+/* =====================================================
+   QR DIVIDER
+===================================================== */
+
+.qr-divider {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 12px;
+
+    margin:
+        24px 0 20px;
+
+    color:
+        #94a3b8;
+
+    font-size:
+        14px;
+}
+
+
+.qr-divider-line {
+
+    flex: 1;
+
+    height: 1px;
+
+    background:
+        rgba(148,163,184,0.25);
+}
+
+
+/* =====================================================
+   QR BUTTON
+===================================================== */
+
+.qr-login-btn {
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    gap: 10px;
+
+    width: 100%;
+
+    padding:
+        14px 18px;
+
+    border-radius:
+        50px;
+
+    background:
+
+        linear-gradient(
+            135deg,
             #667eea,
             #764ba2
         );
 
-    border-radius: 20px;
+    color:
+        white;
 
+    text-decoration:
+        none;
+
+    font-size:
+        16px;
+
+    font-weight:
+        700;
+
+    box-shadow:
+
+        0 10px 30px
+        rgba(102,126,234,0.30);
+
+    transition:
+        all 0.3s ease;
 }
 
-.section {
 
-    margin-top: 35px;
+.qr-login-btn:hover {
 
-    text-align: left;
+    color:
+        white;
 
+    transform:
+        translateY(-4px)
+        scale(1.02);
+
+    box-shadow:
+
+        0 16px 35px
+        rgba(102,126,234,0.45);
 }
 
-.section h2 {
 
-    color: #333;
+.qr-icon {
 
-    border-bottom: 2px solid #eee;
-
-    padding-bottom: 10px;
-
+    font-size:
+        20px;
 }
 
-.answer {
 
-    background: #f8f9ff;
+/* =====================================================
+   QR DESCRIPTION
+===================================================== */
 
-    padding: 15px;
+.qr-description {
 
-    border-radius: 12px;
+    font-size:
+        12px;
 
-    margin: 12px 0;
+    color:
+        #64748b;
 
+    text-align:
+        center;
+
+    margin-top:
+        10px;
+
+    margin-bottom:
+        0;
 }
 
-.correct {
 
-    color: green;
+/* =====================================================
+   FOOTER
+===================================================== */
 
-    font-weight: bold;
+.login-footer {
 
+    text-align:
+        center;
+
+    margin-top:
+        20px;
+
+    color:
+        #64748b;
+
+    font-size:
+        13px;
 }
 
-.wrong {
 
-    color: red;
+/* =====================================================
+   MOBILE
+===================================================== */
 
-    font-weight: bold;
+@media (max-width: 600px) {
 
-}
+    .login-wrapper {
 
-.buttons {
-
-    display: flex;
-
-    justify-content: center;
-
-    gap: 15px;
-
-    flex-wrap: wrap;
-
-    margin-top: 35px;
-
-}
-
-.btn {
-
-    text-decoration: none;
-
-    padding: 14px 25px;
-
-    border-radius: 12px;
-
-    font-weight: bold;
-
-    display: inline-block;
-
-}
-
-.btn-primary {
-
-    background: #667eea;
-
-    color: white;
-
-}
-
-.btn-success {
-
-    background: #28a745;
-
-    color: white;
-
-}
-
-.btn-dark {
-
-    background: #222;
-
-    color: white;
-
-}
-
-.btn:hover {
-
-    opacity: 0.85;
-
-}  .btn-back {
-    background: #dc3545;
-    color: white;
-    border: 2px solid #dc3545;
-    transition: all 0.3s ease;
-}
-
-.btn-back:hover {
-    background: #b02a37;
-    border-color: #b02a37;
-    color: white;
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(220, 53, 69, 0.3);
-}
-
-.skill-card {
-
-    background: #f5f7ff;
-
-    padding: 20px;
-
-    border-radius: 15px;
-
-    margin: 10px 0;
-
-    text-align: left;
-
-}
-
-.skill-name {
-
-    font-weight: bold;
-
-    font-size: 18px;
-
-}
-
-.skill-info {
-
-    margin-top: 7px;
-
-    color: #555;
-
-}
-
-@media(max-width: 700px) {
-
-    .score-box {
-
-        grid-template-columns: 1fr;
-
+        padding:
+            18px;
     }
 
-    .result-card {
+    .login-card {
 
-        padding: 25px;
-
+        max-width:
+            100%;
     }
 
+    .login-body {
+
+        padding:
+            22px;
+    }
+
+    .login-header h3 {
+
+        font-size:
+            24px;
+    }
+
+    .login-icon {
+
+        width:
+            65px;
+
+        height:
+            65px;
+
+        font-size:
+            30px;
+    }
+
+    .node {
+
+        display:
+            none;
+    }
+
+    .network-line {
+
+        display:
+            none;
+    }
 }
 
 </style>
 
 </head>
 
+
 <body>
 
-<div class="container">
 
-<div class="result-card">
+<!-- BACKGROUND -->
 
-    <div class="icon">
-        ✓
-    </div>
+<div class="bg-orb orb-one"></div>
 
-    <h1>
-        Quiz Completed!
-    </h1>
+<div class="bg-orb orb-two"></div>
 
-    <div class="course">
-        <?php
-        echo htmlspecialchars($course_name);
-        ?>
-    </div>
 
-    <div class="message">
-        <?php
-        echo $message;
-        ?>
-    </div>
+<!-- AI NETWORK -->
 
-    <div class="score-box">
+<div class="ai-network">
 
-        <div class="score-item">
+    <div class="node node1"></div>
+    <div class="node node2"></div>
+    <div class="node node3"></div>
+    <div class="node node4"></div>
+    <div class="node node5"></div>
+    <div class="node node6"></div>
+    <div class="node node7"></div>
+    <div class="node node8"></div>
+    <div class="node node9"></div>
+    <div class="node node10"></div>
 
-            <div class="score-number">
-                <?php echo $score; ?>
+    <div class="network-line line1"></div>
+    <div class="network-line line2"></div>
+    <div class="network-line line3"></div>
+    <div class="network-line line4"></div>
+    <div class="network-line line5"></div>
+    <div class="network-line line6"></div>
+
+</div>
+
+
+<!-- PARTICLES -->
+
+<div class="particle p1"></div>
+<div class="particle p2"></div>
+<div class="particle p3"></div>
+<div class="particle p4"></div>
+<div class="particle p5"></div>
+
+
+<!-- LOGIN -->
+
+<div class="login-wrapper">
+
+    <div class="login-card">
+
+        <!-- HEADER -->
+
+        <div class="login-header">
+
+            <div class="login-icon">
+                🎓
             </div>
 
-            <div class="score-label">
-                Correct Answers
-            </div>
+            <h3>
+                Student Login
+            </h3>
+
+            <p>
+                Welcome back! Continue your learning journey.
+            </p>
 
         </div>
 
-        <div class="score-item">
 
-            <div class="score-number">
-                <?php echo $total_questions; ?>
-            </div>
+        <!-- BODY -->
 
-            <div class="score-label">
-                Total Questions
-            </div>
+        <div class="login-body">
 
-        </div>
+            <?php if ($error != "") { ?>
 
-        <div class="score-item">
+                <div class="alert alert-danger">
 
-            <div class="score-number">
-                <?php echo $percentage; ?>%
-            </div>
-
-            <div class="score-label">
-                Final Score
-            </div>
-
-        </div>
-
-    </div>
-
-    <div class="progress">
-
-        <div class="progress-bar"></div>
-
-    </div>
-
-    <!-- ==========================================
-         WRONG / UNANSWERED
-    =========================================== -->
-
-    <?php if (count($wrong_answers) > 0): ?>
-
-    <div class="section">
-
-        <h2>
-            Review Your Answers
-        </h2>
-
-        <?php foreach ($wrong_answers as $wrong): ?>
-
-        <div class="answer">
-
-            <strong>
-                <?php
-                echo strtoupper(
-                    htmlspecialchars(
-                        $wrong['question']
-                    )
-                );
-                ?>
-            </strong>
-
-            <br><br>
-
-            Your Answer:
-
-            <span class="wrong">
-                <?php
-                echo htmlspecialchars(
-                    $wrong['user_answer']
-                );
-                ?>
-            </span>
-
-            <br>
-
-            Correct Answer:
-
-            <span class="correct">
-                <?php
-                echo htmlspecialchars(
-                    $wrong['correct_answer']
-                );
-                ?>
-            </span>
-
-        </div>
-
-        <?php endforeach; ?>
-
-    </div>
-
-    <?php endif; ?>
-
-    <!-- ==========================================
-         SKILLS
-    =========================================== -->
-
-    <?php if (mysqli_num_rows($final_skill_result) > 0): ?>
-
-    <div class="section">
-
-        <h2>
-            Your Updated Skills
-        </h2>
-
-        <?php while (
-            $skill =
-            mysqli_fetch_assoc(
-                $final_skill_result
-            )
-        ): ?>
-
-        <div class="skill-card">
-
-            <div class="skill-name">
-
-                <?php
-                echo htmlspecialchars(
-                    $skill['skill_name']
-                );
-                ?>
-
-            </div>
-
-            <div class="skill-info">
-
-                Score:
-                <strong>
                     <?php
-                    echo $skill['skill_score'];
-                    ?>%
-                </strong>
-
-                &nbsp; | &nbsp;
-
-                Level:
-                <strong>
-                    <?php
-                    echo htmlspecialchars(
-                        $skill['skill_level']
-                    );
+                    echo htmlspecialchars($error);
                     ?>
-                </strong>
 
-                &nbsp; | &nbsp;
+                </div>
 
-                Source:
-                <strong>
-                    <?php
-                    echo htmlspecialchars(
-                        $skill['source']
-                    );
-                    ?>
-                </strong>
+            <?php } ?>
+
+
+            <!-- FORM -->
+
+            <form method="POST">
+
+                <!-- NAME -->
+
+                <div class="form-group">
+
+                    <label class="form-label">
+                        👤 Student Name
+                    </label>
+
+                    <input
+                        type="text"
+                        name="name"
+                        class="form-control"
+                        placeholder="Enter your name"
+                        autocomplete="name"
+                        required>
+
+                </div>
+
+
+                <!-- EMAIL -->
+
+                <div class="form-group">
+
+                    <label class="form-label">
+                        📧 Email
+                    </label>
+
+                    <input
+                        type="email"
+                        name="email"
+                        class="form-control"
+                        placeholder="Enter your email"
+                        autocomplete="email"
+                        required>
+
+                </div>
+
+
+                <!-- PASSWORD -->
+
+                <div class="form-group">
+
+                    <label class="form-label">
+                        🔐 Password
+                    </label>
+
+                    <input
+                        type="password"
+                        name="password"
+                        class="form-control"
+                        placeholder="Enter your password"
+                        autocomplete="current-password"
+                        required>
+
+                </div>
+
+
+                <!-- LOGIN -->
+
+                <button
+                    type="submit"
+                    class="login-btn">
+
+                    Login
+
+                    <span class="login-arrow">
+                        ➜
+                    </span>
+
+                </button>
+
+
+                <!-- OR -->
+
+                <div class="qr-divider">
+
+                    <div class="qr-divider-line"></div>
+
+                    <span>OR</span>
+
+                    <div class="qr-divider-line"></div>
+
+                </div>
+
+
+                <!-- QR LOGIN -->
+
+                <a
+                    href="student/qr_generate.php"
+                    class="qr-login-btn">
+
+                    <span class="qr-icon">
+                        📱
+                    </span>
+
+                    Login with QR Code
+
+                </a>
+
+
+                <p class="qr-description">
+
+                    Scan the QR code using your mobile to login securely.
+
+                </p>
+
+            </form>
+
+
+            <!-- FOOTER -->
+
+            <div class="login-footer">
+
+                🔒 Secure Student Login
 
             </div>
 
         </div>
-
-        <?php endwhile; ?>
-
-    </div>
-
-    <?php endif; ?>
-
-    <!-- ==========================================
-         BUTTONS
-    =========================================== -->
-
-    <div class="buttons">
-        <a href="javascript:void(0);"
-   onclick="if (window.history.length > 1) { window.history.back(); } else { window.location.href='student/dashboard.php'; }"
-   class="btn btn-back">
-
-    &#8592; Back
-
-</a>
-
-        <a
-            href="quiz.php?course_id=<?php
-            echo $course_id;
-            ?>"
-            class="btn btn-primary">
-
-            Try Again
-
-        </a>
-
-       <a
-    href="certificates/certificate.php?course_id=<?php echo $course_id; ?>"
-    class="btn btn-warning">
-
-    🎓 Generate Certificate
-
-</a>
-
-        <a
-            href="student/course_content.php?course_id=<?php
-            echo $course_id;
-            ?>"
-            class="btn btn-dark">
-
-            Continue Course
-
-        </a>
 
     </div>
 
 </div>
 
-</div>
 
 </body>
 
