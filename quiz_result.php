@@ -866,6 +866,19 @@ h1 {
 
     opacity: 0.85;
 
+}  .btn-back {
+    background: #dc3545;
+    color: white;
+    border: 2px solid #dc3545;
+    transition: all 0.3s ease;
+}
+
+.btn-back:hover {
+    background: #b02a37;
+    border-color: #b02a37;
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(220, 53, 69, 0.3);
 }
 
 .skill-card {
@@ -1125,6 +1138,13 @@ h1 {
     =========================================== -->
 
     <div class="buttons">
+        <a href="javascript:void(0);"
+   onclick="if (window.history.length > 1) { window.history.back(); } else { window.location.href='student/dashboard.php'; }"
+   class="btn btn-back">
+
+    &#8592; Back
+
+</a>
 
         <a
             href="quiz.php?course_id=<?php
@@ -1136,13 +1156,13 @@ h1 {
 
         </a>
 
-        <a
-            href="student/career_intelligence.php"
-            class="btn btn-success">
+       <a
+    href="certificates/certificate.php?course_id=<?php echo $course_id; ?>"
+    class="btn btn-warning">
 
-            View Career Intelligence
+    🎓 Generate Certificate
 
-        </a>
+</a>
 
         <a
             href="student/course_content.php?course_id=<?php
